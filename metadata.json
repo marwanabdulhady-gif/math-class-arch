@@ -1,0 +1,9 @@
+{
+  "name": "Learning Quest Hub",
+  "description": "A gamified learning management platform where AI generates personalized learning paths (Quests) for any topic. Track progress, earn XP, and master new skills with AI assistance.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
