@@ -1,9 +1,10 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Task, ChatMessage, AiPersona } from '../types';
 import * as Icons from 'lucide-react';
-import { generateLessonContent, generateQuiz, generateSimulation, getAiTutorResponse, generateFlashcards, generateSlides } from '../services/geminiService';
+import { generateLessonContent, generateQuiz, generateSimulation, getAiTutorResponse, generateFlashcards, generateSlides, generateEducationalGame } from '../services/geminiService';
 import Button from './Button';
 import { CONTENT_TYPE_CONFIG } from '../constants';
 import HTMLViewer from './HTMLViewer';
@@ -75,19 +76,20 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onToggle, onUpdate, yearTitle
           }
 
           if (mode === 'slides_only' || (mode === 'full' && !task.slides)) {
-               updates.slides = await generateSlides(task.title);
+               // Use task plan grade level if available, otherwise default to context or a safe default
+               const gradeLevel = task.plan?.gradeLevel || yearTitle || 'Grade 8';
+               updates.slides = await generateSlides(task.title, task.plan, 5, gradeLevel);
                if (mode === 'slides_only') setShowSlides(true);
           }
           
           if (mode === 'simulation_only' || (mode === 'full' && task.type === 'Game' && allowSim)) {
-               updates.htmlContent = await generateSimulation(task.title, task.description);
+               updates.htmlContent = await generateSimulation(task.title, task.plan, "Medium (2-3 Variables)", "Key variables", yearTitle || task.plan?.gradeLevel || "High School");
                if (mode === 'simulation_only') setShowHtml(true);
           }
           
           // For K-7, "Game" maps to HTML Activity
           if (mode === 'activity_only' || (mode === 'full' && task.type === 'Game' && !allowSim)) {
-                // We use the same generator but prompt it differently internally or just accept HTML
-               updates.htmlContent = await generateSimulation(task.title, `Create a simple, colorful, click-based interactive educational game for ${yearTitle || 'elementary students'}. ${task.description}`);
+               updates.htmlContent = await generateEducationalGame(task.title, task.plan, "Quiz Show", "Medium", yearTitle || task.plan?.gradeLevel || "Grade 4");
                if (mode === 'activity_only') setShowHtml(true);
           }
 

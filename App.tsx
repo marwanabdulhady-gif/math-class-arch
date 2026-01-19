@@ -18,6 +18,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import Navigation from './components/Navigation';
 import SettingsView from './components/SettingsView';
 import GradeSelector from './components/GradeSelector';
+import VaultView from './components/VaultView'; // Imported VaultView
 import { getStandardCurriculum } from './defaultCurriculum';
 
 // Utility for persistence - UPDATED TO V18 TO FORCE RESET
@@ -100,7 +101,12 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ quests, stats, years, classes, students }));
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ quests, stats, years, classes, students }));
+    } catch (e) {
+        console.error("Storage limit reached or error saving data", e);
+        // Optional: show a warning toast that data isn't persisting
+    }
   }, [quests, stats, years, classes, students]);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -166,6 +172,11 @@ const App: React.FC = () => {
     setQuests(prev => [newQuest, ...prev]);
     showToast('New Unit added');
   };
+  
+  const handleDeleteQuest = (id: string) => {
+      setQuests(prev => prev.filter(q => q.id !== id));
+      showToast('Unit removed from Vault');
+  }
 
   // --- NAVIGATION LOGIC ---
 
@@ -447,6 +458,13 @@ const App: React.FC = () => {
                     : renderDashboard()
                 )}
                 {currentView === 'explore' && renderExplorer()}
+                {currentView === 'vault' && (
+                    <VaultView 
+                        quests={quests} 
+                        onSelectQuest={(q) => { setSelectedQuestId(q.id); setCurrentView('explore'); }}
+                        onDeleteQuest={handleDeleteQuest}
+                    />
+                )}
                 {currentView === 'settings' && <SettingsView currentRole={role} onToggleRole={handleToggleRole} onOpenAdmin={() => {}} onUpdateData={handleAdminUpdate} />}
             </main>
         </div>

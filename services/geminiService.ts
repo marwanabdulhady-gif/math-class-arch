@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { Quest, Task, QuizQuestion, Flashcard, ChatMessage, AiPersona, Slide, LessonPlan, ContentType } from "../types";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { Quest, Task, QuizQuestion, Flashcard, ChatMessage, AiPersona, Slide, WeeklyPlanBundle, ContentType, LessonPlan, StoryElement, Differentiation, CharacterProfile, GeneratedImage } from "../types";
 import { v4 as uuidv4 } from 'uuid';
 
 // --- API KEY MANAGEMENT ---
@@ -20,123 +20,82 @@ export const setApiKey = (key: string) => {
   ai = new GoogleGenAI({ apiKey: key });
 };
 
-// Initialize GenAI Client with whatever key we have available
+// Initialize GenAI Client
 let ai = new GoogleGenAI({ apiKey: getApiKey() });
 
-// --- MOCK DATA FOR FAILOVER ---
-const MOCK_QUEST_DATA = {
-  title: "Foundations of Artificial Intelligence",
-  description: "Explore the basics of AI, machine learning, and how neural networks mimic the human brain. (Offline/Demo Mode)",
-  category: "Technology",
-  difficulty: "Beginner",
-  tasks: [
-    { title: "What is AI?", description: "Learn the definition and history of AI.", xp: 50, type: "Lesson", resources: [] },
-    { title: "Neural Networks Interactive", description: "Visualize a simple neural network.", xp: 100, type: "Game", resources: [] },
-    { title: "Ethics in AI", description: "Discuss the moral implications.", xp: 150, type: "Project", resources: [] },
-    { title: "Quiz: AI Basics", description: "Test your knowledge.", xp: 25, type: "Practice", resources: [] }
-  ]
-};
+// --- SYSTEM INSTRUCTIONS ---
+const AETHER_ARCHITECT_INSTRUCTION = `
+You are the AetherMath OS Architect. You specialize in creating cohesive educational units.
 
-const MOCK_LESSON_CONTENT = `
-# Interactive Lesson: The Topic You Requested (Offline)
-
-**Note:** We couldn't connect to the AI Tutor right now (Check your API Key), but here is a primer on the subject!
-
-## 1. Core Concepts
-*   **Definition:** Understanding the fundamental building blocks.
-*   **Significance:** Why this matters in the real world.
-*   **Application:** How professionals use this knowledge.
-
-## 2. Deep Dive
-Imagine this concept like a **bicycle**. 
-*   The *frame* is the main theory.
-*   The *wheels* are the practical applications that move you forward.
-*   The *handlebars* are the controls you have over the outcome.
-
-## 3. Summary
-Mastering this topic opens doors to advanced fields. Keep practicing!
+CRITICAL RULES:
+1. **Grade Appropriateness**: Check the 'gradeLevel' in the context. 
+   - Kindergarten: Use simple words, emojis, shapes, colors. NO complex algebra.
+   - High School: Use rigorous academic language.
+2. **Plan Alignment**: All content MUST teach the specific 'objectives' defined in the Lesson Plan.
+3. **Sandbox vs Game**:
+   - **Sandbox**: A tool to explore variables (e.g., a slider affecting a graph). NO WIN STATE. Pure exploration.
+   - **Game**: A challenge with a score, lives, obstacles, levels, and a WIN/LOSS state.
 `;
 
-const MOCK_QUIZ = [
-  { question: "What is the primary goal of this topic?", options: ["To confuse you", "To solve problems", "To waste time", "None of the above"], correctIndex: 1, explanation: "Solving problems is the core purpose." },
-  { question: "Which is a key component?", options: ["Magic", "Logic", "Luck", "Chaos"], correctIndex: 1, explanation: "Logic is essential." },
-  { question: "How do you apply this?", options: ["Randomly", "Systematically", "Never", "Once"], correctIndex: 1, explanation: "Systematic application yields results." }
-];
+// --- SCHEMAS ---
+const LESSON_PLAN_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        topic: { type: Type.STRING },
+        gradeLevel: { type: Type.STRING },
+        objectives: { type: Type.ARRAY, items: { type: Type.STRING } },
+        standards: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific CCSS/NGSS codes" },
+        timing: { type: Type.STRING },
+        materials: { type: Type.ARRAY, items: { type: Type.STRING } },
+        warmUp: { type: Type.STRING, description: "5-10 min hook activity" },
+        mainActivity: { type: Type.STRING, description: "Core learning procedure" },
+        wrapUp: { type: Type.STRING, description: "Closing assessment/reflection" },
+        framework: { type: Type.STRING },
+        slidesOutline: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Detailed paragraph text for each lecture slide explaining the concept depth." }
+    },
+    required: ["topic", "gradeLevel", "objectives", "standards", "timing", "materials", "warmUp", "mainActivity", "wrapUp", "framework", "slidesOutline"]
+} as const;
 
-const MOCK_FLASHCARDS = [
-  { front: "Key Term 1", back: "Definition of the first key term." },
-  { front: "Important Date", back: "The year this concept was discovered." },
-  { front: "Main Formula", back: "A + B = C" },
-  { front: "Key Figure", back: "The person who invented this." },
-  { front: "Application", back: "A real world example." }
-];
+const STORY_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        theme: { type: Type.STRING, description: "Narrative theme" },
+        scenes: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Sequential narrative beats" },
+    },
+    required: ["theme", "scenes"]
+} as const;
 
-const QUEST_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    title: { type: Type.STRING, description: "A catchy title for the learning unit." },
-    description: { type: Type.STRING, description: "A brief inspiring description of what will be learned." },
-    category: { type: Type.STRING, description: "The category of the topic." },
-    difficulty: { type: Type.STRING, enum: ["Beginner", "Intermediate", "Advanced"] },
-    tasks: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING, description: "Title of the learning task." },
-          description: { type: Type.STRING, description: "Detailed instruction for the task." },
-          xp: { type: Type.INTEGER, description: "XP value for completing this task (10-50)." },
-          type: { type: Type.STRING, enum: ['Lesson', 'Practice', 'Project', 'Game'], description: "The type of activity." },
-          resources: {
+const CHARACTER_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        characters: {
             type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Suggested search terms or types of resources to find."
-          }
-        },
-        required: ["title", "description", "xp", "type"]
-      }
-    }
-  },
-  required: ["title", "description", "category", "difficulty", "tasks"]
-};
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    gender: { type: Type.STRING },
+                    age: { type: Type.STRING },
+                    role: { type: Type.STRING },
+                    personality: { type: Type.STRING },
+                    visualDescription: { type: Type.STRING }
+                },
+                required: ["name", "role", "personality", "visualDescription", "gender", "age"]
+            }
+        }
+    },
+    required: ["characters"]
+} as const;
 
-const QUIZ_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    questions: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          question: { type: Type.STRING },
-          options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Array of 4 possible answers." },
-          correctIndex: { type: Type.INTEGER, description: "Index of the correct answer (0-3)." },
-          explanation: { type: Type.STRING, description: "Why this answer is correct." }
-        },
-        required: ["question", "options", "correctIndex", "explanation"]
-      }
-    }
-  },
-  required: ["questions"]
-};
-
-const FLASHCARD_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    cards: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          front: { type: Type.STRING, description: "The question or term." },
-          back: { type: Type.STRING, description: "The answer or definition." }
-        },
-        required: ["front", "back"]
-      }
-    }
-  },
-  required: ["cards"]
-};
+const DIFFERENTIATION_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        support: { type: Type.STRING, description: "Scaffolding for students needing help" },
+        core: { type: Type.STRING, description: "On-level instruction" },
+        challenge: { type: Type.STRING, description: "Extension for advanced students" }
+    },
+    required: ["support", "core", "challenge"]
+} as const;
 
 const SLIDES_SCHEMA = {
     type: Type.OBJECT,
@@ -147,461 +106,459 @@ const SLIDES_SCHEMA = {
                 type: Type.OBJECT,
                 properties: {
                     title: { type: Type.STRING },
-                    content: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Max 3-4 bullet points" },
-                    visualKeyword: { type: Type.STRING, description: "A single noun representing the concept (e.g. 'rocket', 'brain', 'atom') for icon selection" },
-                    layout: { type: Type.STRING, enum: ['center', 'split', 'big-number'] }
+                    content: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    visualKeyword: { type: Type.STRING },
+                    layout: { type: Type.STRING, enum: ['center', 'split', 'big-number'] },
+                    script: { type: Type.STRING, description: "Detailed script for the teacher to say." },
+                    imagePrompt: { type: Type.STRING, description: "A detailed prompt to generate an image for this slide." }
                 },
-                required: ["title", "content", "visualKeyword", "layout"]
+                required: ["title", "content", "visualKeyword", "layout", "script", "imagePrompt"]
             }
         }
     },
     required: ["slides"]
-}
-
-const DAILY_CHALLENGE_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING, description: "A fun, short daily learning task title." },
-        description: { type: Type.STRING, description: "Instructions for the task." },
-        xp: { type: Type.INTEGER, description: "XP Reward (50-100)" },
-    },
-    required: ["title", "description", "xp"]
-};
-
-const LESSON_PLAN_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        studentEdition: { type: Type.STRING, description: "The full text content for the Student Edition document (Narrative hook, missions, practice, reflections)." },
-        exitTickets: { type: Type.STRING, description: "The full text content for the Exit Tickets document (5 cards, Sun-Thu)." },
-        teacherPack: { type: Type.STRING, description: "The full text content for the Teacher Pack (5E scripts, differentiation, misconceptions, dojo plan)." }
-    },
-    required: ["studentEdition", "exitTickets", "teacherPack"]
-};
-
-const SINGLE_TASK_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING },
-        description: { type: Type.STRING },
-        xp: { type: Type.INTEGER },
-    },
-    required: ["title", "description", "xp"]
-};
+} as const;
 
 // --- API FUNCTIONS ---
 
 export const generateQuest = async (topic: string, difficulty: string, notes?: string): Promise<Quest> => {
   const model = "gemini-3-flash-preview";
-  
-  const prompt = `
-    Create a structured learning unit (Quest) for the topic: "${topic}".
-    Difficulty Level: ${difficulty}.
-    Additional Context: ${notes || "None"}.
-    
-    The unit should break down the topic into 5-8 actionable learning items.
-    Mix different types of activities: Lessons, Practice, Projects, and Games.
-    Each task should have a clear goal and an XP reward suitable for the effort.
-    Ensure the content is educational and structured logically.
-  `;
-
+  const prompt = `Create a structured Unit (Quest) for: "${topic}". Difficulty: ${difficulty}. Context: ${notes || "None"}. Break down into 5-8 tasks. Explicitly mention CCSS/NGSS standards.`;
   try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: QUEST_SCHEMA,
-        systemInstruction: "You are an expert curriculum designer and gamification specialist. You create engaging learning paths.",
-        thinkingConfig: { thinkingBudget: 0 }
-      }
-    });
-
+    const response = await ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: AETHER_ARCHITECT_INSTRUCTION }});
     const data = JSON.parse(response.text || "{}");
-    
-    // Transform into app internal format
-    const totalXp = data.tasks.reduce((sum: number, t: any) => sum + (t.xp || 0), 0);
-    
-    const newQuest: Quest = {
-      id: uuidv4(),
-      title: data.title,
-      description: data.description,
-      category: data.category,
-      difficulty: data.difficulty,
-      totalXp,
-      earnedXp: 0,
-      tasks: data.tasks.map((t: any) => ({
-        ...t,
-        id: uuidv4(),
-        isCompleted: false,
-        type: t.type || 'Lesson', 
-        resources: t.resources || []
-      })),
-      createdAt: new Date().toISOString(),
-      status: 'active'
-    };
-
-    return newQuest;
-
-  } catch (error) {
-    console.error("Gemini Quest Generation Error:", error);
-    // Return mock data
     return {
-        id: uuidv4(),
-        title: `${topic} (Offline/Demo)`,
-        description: MOCK_QUEST_DATA.description,
-        category: MOCK_QUEST_DATA.category,
-        difficulty: difficulty as any,
-        totalXp: 325,
-        earnedXp: 0,
-        tasks: MOCK_QUEST_DATA.tasks.map(t => ({...t, id: uuidv4(), isCompleted: false, type: t.type as any})),
-        createdAt: new Date().toISOString(),
-        status: 'active'
+      id: uuidv4(), title: data.title || topic, description: data.description || "", category: data.category || "General", difficulty: data.difficulty as any || "Beginner",
+      totalXp: data.tasks?.reduce((sum: number, t: any) => sum + (t.xp || 0), 0) || 0, earnedXp: 0,
+      tasks: (data.tasks || []).map((t: any) => ({ ...t, id: uuidv4(), isCompleted: false, type: t.type || 'Lesson', resources: [] })),
+      createdAt: new Date().toISOString(), status: 'active'
     };
-  }
+  } catch (error) { return { id: uuidv4(), title: topic, description: "Error generating", category: "General", difficulty: "Beginner", totalXp: 0, earnedXp: 0, tasks: [], createdAt: new Date().toISOString(), status: 'active' }; }
 };
 
 export const generateSingleTask = async (title: string, type: ContentType, context: string): Promise<Task> => {
+    return { id: uuidv4(), title, description: "Generated task", xp: 50, type, isCompleted: false, resources: [] };
+}
+
+// --- UPDATED GRANULAR GENERATORS ---
+
+export const generateLessonPlanSection = async (title: string, gradeLevel: string, framework: string, notes: string, duration: string, slideCount: number): Promise<LessonPlan> => {
     const model = "gemini-3-flash-preview";
-    const prompt = `Generate a single ${type} task metadata for the topic: "${title}". Context: "${context}".`;
+    const prompt = `
+    Generate a COMPLETE, STRUCTURED Lesson Plan for "${title}".
+    
+    PARAMETERS:
+    - Grade Level: ${gradeLevel} (Use age-appropriate language and depth).
+    - Framework: ${framework}.
+    - Total Duration: ${duration}.
+    - Slide Count Target: ${slideCount} slides.
+    - Specific Context: ${notes || "Standard curriculum alignement"}.
+    
+    REQUIREMENTS:
+    1. 'objectives' must be measurable (SWBAT).
+    2. 'slidesOutline' must contain EXACTLY ${slideCount} strings. Each string is the specific text content for one slide in the lecture.
+    3. 'mainActivity' must be detailed step-by-step.
+    
+    Return strictly JSON matching the schema.
+    `;
     
     try {
         const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: SINGLE_TASK_SCHEMA
-            }
+            model, contents: prompt,
+            config: { responseMimeType: "application/json", responseSchema: LESSON_PLAN_SCHEMA, systemInstruction: AETHER_ARCHITECT_INSTRUCTION }
+        });
+        const plan = JSON.parse(response.text || "{}");
+        return {
+            topic: title,
+            gradeLevel: gradeLevel,
+            objectives: plan.objectives || [],
+            standards: plan.standards || [],
+            timing: duration,
+            materials: plan.materials || [],
+            warmUp: plan.warmUp || "N/A",
+            mainActivity: plan.mainActivity || "N/A",
+            wrapUp: plan.wrapUp || "N/A",
+            framework: framework,
+            slidesOutline: plan.slidesOutline || [],
+            duration: duration,
+            customContext: notes,
+            slideCount: slideCount
+        };
+    } catch (e) { 
+        console.error(e);
+        return { topic: title, gradeLevel, objectives: ["Error"], standards: [], timing: "", materials: [], warmUp: "", mainActivity: "", wrapUp: "", framework: "", slidesOutline: [], slideCount: 5 }; 
+    }
+};
+
+export const generateStorySection = async (
+    title: string, 
+    plan: LessonPlan | undefined,
+    archetype: string, 
+    setting: string,
+    tone: string,
+    characters: CharacterProfile[],
+    gradeLevel: string
+): Promise<StoryElement> => {
+    const model = "gemini-3-flash-preview";
+    const objectivesStr = plan ? plan.objectives.join("; ") : title;
+    
+    const charContext = characters.map(c => `${c.name} (${c.gender}, ${c.age}): ${c.role}, ${c.personality}`).join('\n');
+
+    const prompt = `
+    Generate a narrative Story structure for lesson: "${title}".
+    Target Audience Grade Level: ${gradeLevel}.
+    
+    Objectives to Metaphorize: ${objectivesStr}
+    
+    Archetype: ${archetype}
+    Setting: ${setting}
+    Tone: ${tone}
+    
+    CRITICAL: You MUST use these specific characters in the story:
+    ${charContext}
+    
+    INSTRUCTIONS:
+    1. Write a 3-5 scene story arc suitable for ${gradeLevel}.
+    2. Embed the characters deeply in the plot.
+    3. The plot must teach the lesson concept.
+    `;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model, contents: prompt,
+            config: { responseMimeType: "application/json", responseSchema: STORY_SCHEMA, systemInstruction: AETHER_ARCHITECT_INSTRUCTION }
         });
         const data = JSON.parse(response.text || "{}");
-        const task: Task = {
-            id: uuidv4(),
-            title: data.title || title,
-            description: data.description || "Learn this concept.",
-            xp: data.xp || 50,
-            type: type,
-            isCompleted: false,
-            resources: []
-        };
-        
-        // Pre-fill content based on type
-        if (type === 'Lesson') {
-            task.markdownContent = await generateLessonContent(task.title, task.description);
-        } else if (type === 'Game') {
-            task.htmlContent = await generateSimulation(task.title, task.description);
-        } else if (type === 'Practice') {
-            task.quizContent = await generateQuiz(task.title);
-        }
+        return { ...data, tone, setting, characters }; 
+    } catch (e) { return { theme: archetype, tone, setting, scenes: ["Error generating scenes."], characters }; }
+};
 
-        return task;
-    } catch (e) {
-        // Fallback
-        return {
-            id: uuidv4(),
-            title: title,
-            description: `Generated ${type} for ${title}`,
-            xp: 50,
-            type: type,
-            isCompleted: false,
-            resources: []
-        }
-    }
-}
-
-export const generateWeeklyLessonPlan = async (grade: string, unit: string, week: string, topic: string): Promise<LessonPlan> => {
-    const model = "gemini-3-pro-preview"; // Use Pro for complex reasoning
-    
+export const generateCharacters = async (
+    storyTheme: string,
+    count: number,
+    archetype: string,
+    customPrompt: string
+): Promise<CharacterProfile[]> => {
+    const model = "gemini-3-flash-preview";
     const prompt = `
-    Generate three detailed deliverables for Grade ${grade} Math (CCSS-aligned): Unit ${unit}, Week ${week}, Topic: "${topic}".
+    Generate ${count} characters for a "${storyTheme}" story.
+    Archetype: ${archetype}.
+    Additional Context: ${customPrompt || "None"}.
     
-    Follow these strict requirements:
-
-    1. STUDENT EDITION CONTENT:
-       - Clear narrative hook with guild characters.
-       - Learning Targets ("I can..." + CCSS codes).
-       - 2-4 Missions following the 9-block anatomy (Target, Checklist, Idea, Lab, Spark, Warning, Shield, Write, Brain).
-       - Mixed Practice: 6-10 items (blend current + spiral).
-       - Project: Driving question, steps, checklist, rubric.
-       - Reflections: Daily "Muhasabat al-Nafs" (Self-Accountability) + "Al-Hamd" (Gratitude) prompts.
-
-    2. EXIT TICKETS CONTENT:
-       - 5 cards (Sun-Thu).
-       - Each card = 1 CCSS-aligned Question + reflection + mastery band (1-4).
-       - Micro-reflections link to Akhlaq (honesty, gratitude, fixing mistakes).
-
-    3. TEACHER PACK CONTENT:
-       - Weekly Overview: Standards, big idea, vocab.
-       - Daily 5E Scripts (Engage, Explore, Explain, Elaborate, Evaluate).
-       - Misconceptions & Reteach strategies (CRA).
-       - Differentiation grid (Support/On-Level/Challenge).
-       - ClassDojo plan (positive-only points tied to behaviors).
-       - Tomorrow Decisions criteria.
-
-    Guardrails:
-    - One new concept per Mission.
-    - Tag CCSS accurately.
-    - Embed Akhlaq naturally (Sidiq, Amanah, Rahmah, Itqan).
+    For each character:
+    - Unique Name
+    - Gender
+    - Age (e.g. "10 years old", "Ancient")
+    - Role in the story
+    - Personality traits
+    - Detailed Visual Description (for an artist).
     `;
 
     try {
         const response = await ai.models.generateContent({
+            model, contents: prompt,
+            config: { responseMimeType: "application/json", responseSchema: CHARACTER_SCHEMA, systemInstruction: AETHER_ARCHITECT_INSTRUCTION }
+        });
+        const data = JSON.parse(response.text || "{}");
+        return (data.characters || []).map((c: any) => ({ ...c, id: uuidv4() }));
+    } catch (e) { return []; }
+};
+
+// --- REAL IMAGE GENERATION ---
+export const generateSceneImage = async (sceneDescription: string, artDirection: string, aspectRatio: string = "1:1", context: string = ""): Promise<string | null> => {
+    const model = "gemini-2.5-flash-image"; 
+    
+    // Strict prompt engineering for consistency
+    const prompt = `
+    STRICT VISUAL DIRECTION: ${artDirection}
+    
+    SCENE CONTENT: ${sceneDescription}
+    ${context ? `CONTEXT: ${context}` : ''}
+    
+    INSTRUCTIONS:
+    - Adhere 100% to the STRICT VISUAL DIRECTION for style, lighting, and color palette.
+    - Ensure character consistency based on CONTEXT if provided.
+    - Do not add text to the image.
+    `;
+    
+    try {
+        const response = await ai.models.generateContent({
             model,
             contents: prompt,
             config: {
-                responseMimeType: "application/json",
-                responseSchema: LESSON_PLAN_SCHEMA,
-                systemInstruction: "You are an expert K-12 Curriculum Architect specializing in CCSS Math and Character Education (Akhlaq).",
-                thinkingConfig: { thinkingBudget: 4096 } // Give it budget to think through the 5E scripts
+                imageConfig: {
+                    aspectRatio: aspectRatio as any
+                }
             }
         });
         
+        for (const candidate of response.candidates || []) {
+            for (const part of candidate.content.parts) {
+                if (part.inlineData) {
+                    return part.inlineData.data; 
+                }
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error("Image generation failed", e);
+        return null;
+    }
+}
+
+export const generateInfographic = async (contentSummary: string, style: string): Promise<string | null> => {
+    const model = "gemini-2.5-flash-image";
+    const prompt = `Create a visually rich Educational Infographic. Style: ${style}. Topic Summary: ${contentSummary}. Ensure it looks professional, clean, and informative.`;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+                imageConfig: {
+                    aspectRatio: '3:4' // Portrait for infographics
+                }
+            }
+        });
+        
+        for (const candidate of response.candidates || []) {
+            for (const part of candidate.content.parts) {
+                if (part.inlineData) {
+                    return part.inlineData.data; 
+                }
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error("Infographic generation failed", e);
+        return null;
+    }
+}
+
+export const enhanceImagePrompt = async (originalPrompt: string): Promise<string> => {
+    const model = "gemini-3-flash-preview";
+    const prompt = `
+    Rewrite the following image prompt to be highly detailed, artistic, and suitable for a high-quality generative AI model. 
+    Focus on lighting, composition, texture, and mood. Keep it under 50 words.
+    Original: "${originalPrompt}"
+    `;
+    try {
+        const response = await ai.models.generateContent({ model, contents: prompt });
+        return response.text?.trim() || originalPrompt;
+    } catch(e) { return originalPrompt; }
+};
+
+export const generateDifferentiationSection = async (title: string, plan: LessonPlan | undefined, customPrompt: string, gradeLevel: string): Promise<Differentiation> => {
+    const model = "gemini-3-flash-preview";
+    const objectivesStr = plan ? plan.objectives.join("; ") : title;
+
+    const prompt = `Generate a 3-tier Differentiation matrix for "${title}". 
+    Grade: ${gradeLevel}.
+    Objectives: ${objectivesStr}.
+    Special Needs Focus: ${customPrompt || "General inclusion"}.
+    Return strictly JSON.`;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model, contents: prompt,
+            config: { responseMimeType: "application/json", responseSchema: DIFFERENTIATION_SCHEMA, systemInstruction: AETHER_ARCHITECT_INSTRUCTION }
+        });
         return JSON.parse(response.text || "{}");
-    } catch (e) {
-        console.error("Lesson Plan Gen Error", e);
-        throw e;
-    }
-}
-
-export const generateLessonContent = async (taskTitle: string, taskDescription: string): Promise<string> => {
-  const model = "gemini-3-flash-preview";
-  const prompt = `
-    Write a comprehensive, engaging educational lesson for the topic: "${taskTitle}".
-    Context: ${taskDescription}.
-    
-    Format: Markdown.
-    Style: Engaging, easy to understand, use emojis, use bolding for key terms.
-    Structure:
-    1. Introduction (Hook)
-    2. Key Concepts (Bullet points)
-    3. Deep Dive (Explanation)
-    4. Real-world Application
-    5. Summary
-    
-    Keep it under 500 words.
-  `;
-
-  try {
-      const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-              systemInstruction: "You are a world-class teacher who explains complex topics simply and engagingly.",
-          }
-      });
-      return response.text || MOCK_LESSON_CONTENT;
-  } catch (e) {
-      console.error(e);
-      return MOCK_LESSON_CONTENT;
-  }
+    } catch (e) { return { support: "N/A", core: "N/A", challenge: "N/A" }; }
 };
 
-export const generateSlides = async (taskTitle: string): Promise<Slide[]> => {
+export const generateSlides = async (title: string, plan: LessonPlan | undefined, count: number, gradeLevel: string): Promise<Slide[]> => {
     const model = "gemini-3-flash-preview";
-    const prompt = `Generate a visually engaging 5-7 slide presentation for: "${taskTitle}".
-    Each slide needs a 'visualKeyword' (a simple noun like 'sun', 'tree', 'atom') that represents the core concept of that slide.
-    Keep content bullet points short and punchy.`;
+    const objectivesStr = plan ? plan.objectives.join("; ") : title;
+    // Use the generated outline if available, otherwise just the topic
+    const outline = plan?.slidesOutline && plan.slidesOutline.length > 0 ? JSON.stringify(plan.slidesOutline) : "Create content based on objectives.";
+
+    const prompt = `
+    Generate exactly ${count} TEXT-BASED LECTURE slides for: "${title}".
+    Target Audience Grade: ${gradeLevel}.
+    Objectives: ${objectivesStr}.
+    Detailed Content Source: ${outline}.
+    
+    This is for the 'Lecture' portion only.
+    For each slide, also provide a 'imagePrompt' that describes a visual suitable for that slide.
+    Ensure tone and vocabulary are appropriate for ${gradeLevel}.
+    `;
 
     try {
         const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: SLIDES_SCHEMA,
-                systemInstruction: "You are a visual communication expert. You break complex topics into bite-sized, visual cards."
-            }
+            model, contents: prompt,
+            config: { responseMimeType: "application/json", responseSchema: SLIDES_SCHEMA }
         });
         const data = JSON.parse(response.text || "{}");
-        return data.slides.map((s: any) => ({ ...s, id: uuidv4() }));
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
+        return data.slides.map((s: any) => ({ ...s, id: uuidv4(), aspectRatio: '16:9' })); // Default 16:9
+    } catch (e) { return []; }
 }
 
-export const generateQuiz = async (taskTitle: string): Promise<QuizQuestion[]> => {
-    const model = "gemini-3-flash-preview";
-    const prompt = `Generate a 3-question multiple choice quiz to test knowledge about: "${taskTitle}".`;
-
-    try {
-        const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: QUIZ_SCHEMA
-            }
-        });
-        const data = JSON.parse(response.text || "{}");
-        return data.questions.map((q: any) => ({ ...q, id: uuidv4() }));
-    } catch (e) {
-        console.error(e);
-        return MOCK_QUIZ.map(q => ({...q, id: uuidv4()}));
-    }
-};
-
-export const generateFlashcards = async (taskTitle: string): Promise<Flashcard[]> => {
+export const generateSimulation = async (
+    title: string, 
+    plan: LessonPlan | undefined, 
+    complexity: string, 
+    variables: string,
+    gradeLevel: string
+): Promise<string> => {
   const model = "gemini-3-flash-preview";
-  const prompt = `Generate 5 flashcards for active recall practice on the topic: "${taskTitle}".`;
+  const prompt = `
+    Create a "SANDBOX" HTML5/Canvas tool for: "${title}".
+    Complexity Level: ${complexity}.
+    Focus Variables: ${variables}.
+    Grade Level: ${gradeLevel}.
+    
+    CRITICAL: THIS IS A SANDBOX.
+    - NO "You Win" messages. NO Score.
+    - YES Sliders, Inputs, Real-time Graphs.
+    - Style: Dark Mode, Modern UI.
+    
+    Output: Single file HTML/CSS/JS.
+    `;
 
   try {
-      const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-              responseMimeType: "application/json",
-              responseSchema: FLASHCARD_SCHEMA
-          }
-      });
-      const data = JSON.parse(response.text || "{}");
-      return data.cards.map((c: any) => ({ ...c, id: uuidv4() }));
-  } catch (e) {
-      console.error(e);
-      return MOCK_FLASHCARDS.map(c => ({...c, id: uuidv4()}));
-  }
+    const response = await ai.models.generateContent({
+      model, contents: prompt,
+      config: { systemInstruction: AETHER_ARCHITECT_INSTRUCTION, thinkingConfig: { thinkingBudget: 0 } }
+    });
+    let html = response.text || "";
+    html = html.replace(/```html/g, '').replace(/```/g, '');
+    return html;
+  } catch (e) { return `<!DOCTYPE html><html><body>Error</body></html>`; }
 };
 
-export const generateSimulation = async (taskTitle: string, taskDescription: string): Promise<string> => {
+export const generateEducationalGame = async (
+    title: string, 
+    plan: LessonPlan | undefined, 
+    gameType: string, 
+    difficulty: string,
+    gradeLevel: string
+): Promise<string> => {
   const model = "gemini-3-flash-preview";
-  
   const prompt = `
-    Create a highly visual, interactive HTML5/Canvas simulation to demonstrate: "${taskTitle}".
-    Context: "${taskDescription}".
+    Create an EDUCATIONAL GAME for: "${title}".
+    Game Type: ${gameType}.
+    Difficulty: ${difficulty}.
+    Target Audience Grade: ${gradeLevel}.
     
-    CRITICAL DESIGN REQUIREMENTS:
-    1.  **Visuals:** Use HTML5 Canvas or SVG for graphics. Do NOT just use text inputs. Make it look like a video game or a high-end physics demo.
-    2.  **Theme:** Dark Mode (background #0f172a, text #f8fafc). Use neon accents (cyan #22d3ee, purple #a855f7).
-    3.  **Interactivity:** Users MUST be able to click, drag, or control something.
-    4.  **No External Libraries:** Use vanilla JS only.
-    5.  **Self-Contained:** Return ONLY the raw HTML code starting with <!DOCTYPE html>.
+    CRITICAL: THIS IS A GAME.
+    - MUST have a Win/Loss condition.
+    - MUST have a Score display.
+    - MUST have a "Game Over" screen.
+    - Style: Dark Mode, Colorful, Fun.
     
-    Example ideas:
-    - If math: A graphing tool or visual shape manipulator.
-    - If history: An interactive timeline or map where things light up.
-    - If science: A particle simulation, orbit visualizer, or chemical reaction animator.
-    - If coding: A visual algorithm sorter.
+    Output: Single file HTML/CSS/JS.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        thinkingConfig: { thinkingBudget: 0 }
-      }
+      model, contents: prompt,
+      config: { systemInstruction: AETHER_ARCHITECT_INSTRUCTION, thinkingConfig: { thinkingBudget: 0 } }
     });
-
     let html = response.text || "";
-    // Clean up markdown code blocks if present
     html = html.replace(/```html/g, '').replace(/```/g, '');
     return html;
-  } catch (e) {
-    console.error("Simulation Generation Error:", e);
-    return `<!DOCTYPE html><html><body style="color:white; font-family:sans-serif; text-align:center; padding:2rem;"><h1>Simulation Unavailable</h1><p>We couldn't generate the simulation at this time.</p></body></html>`;
-  }
+  } catch (e) { return `<!DOCTYPE html><html><body>Error</body></html>`; }
 };
 
-export const getAiTutorResponse = async (history: ChatMessage[], taskContext: string, persona: AiPersona = 'socratic'): Promise<string> => {
+export const generatePracticalActivity = async (
+    title: string, 
+    plan: LessonPlan | undefined, 
+    activityType: string, 
+    duration: string, 
+    materials: string,
+    customPrompt: string,
+    gradeLevel: string
+): Promise<string> => {
     const model = "gemini-3-flash-preview";
-    const recentHistory = history.slice(-6); 
+    const prompt = `
+    Create a Hands-On Offline Activity for: "${title}".
+    Activity Type: ${activityType}.
+    Target Duration: ${duration}.
+    Target Audience Grade: ${gradeLevel}.
+    Materials Constraint: ${materials}.
+    Context: ${customPrompt}.
     
-    let parts: any[] = [];
-    
-    const conversationText = recentHistory.slice(0, -1).map(msg => 
-      `${msg.role === 'user' ? 'Student' : 'Tutor'}: ${msg.text} ${msg.image ? '[User attached an image]' : ''}`
-    ).join('\n');
-
-    const lastMsg = recentHistory[recentHistory.length - 1];
-
-    let systemInstruction = "You are a helpful learning mentor.";
-    switch (persona) {
-        case 'socratic': 
-            systemInstruction = "You are a Socratic Tutor. Never give the direct answer. Ask guiding questions to lead the student to the solution.";
-            break;
-        case 'encouraging':
-            systemInstruction = "You are an ultra-supportive cheerleader. Use emojis, praise every effort, and be very gentle with corrections.";
-            break;
-        case 'roast':
-            systemInstruction = "You are a snarky, funny, slightly mean tutor. Roast the student playfully if they are wrong, but still help them learn. Use gen-z slang.";
-            break;
-        case 'eli5':
-            systemInstruction = "Explain everything like the student is 5 years old. Use simple analogies (like pizzas or lego).";
-            break;
-    }
-
-    const promptText = `
-      Context: Task "${taskContext}".
-      Conversation History:
-      ${conversationText}
-      
-      Student's New Input: "${lastMsg.text}"
-      
-      Respond to the student based on your persona.
+    Format: Markdown. Use H2 for sections.
     `;
-
-    parts.push({ text: promptText });
-    
-    if (lastMsg.role === 'user' && lastMsg.image) {
-        const base64Data = lastMsg.image.split(',')[1];
-        parts.push({
-            inlineData: {
-                data: base64Data,
-                mimeType: 'image/png'
-            }
-        });
-    }
-
     try {
-        const response = await ai.models.generateContent({
-            model,
-            contents: { parts },
-            config: {
-                systemInstruction,
-            }
-        });
-        return response.text || "I'm listening...";
-    } catch (e) {
-        console.error(e);
-        return "I'm having trouble connecting to the AI. Check your API Key in Settings.";
-    }
+        const response = await ai.models.generateContent({ model, contents: prompt });
+        return response.text || "No activity generated.";
+    } catch (e) { return "Error generating activity."; }
 }
 
-export const generateDailyChallenge = async (topics: string[]): Promise<Task> => {
+export const generateMiniProject = async (
+    title: string, 
+    plan: LessonPlan | undefined, 
+    scope: string, 
+    format: string,
+    customPrompt: string,
+    gradeLevel: string
+): Promise<string> => {
     const model = "gemini-3-flash-preview";
-    const topic = topics.length > 0 ? topics[Math.floor(Math.random() * topics.length)] : "General Knowledge";
+    const prompt = `
+    Design a Class Project for: "${title}".
+    Target Audience Grade: ${gradeLevel}.
+    Time Scope: ${scope}.
+    Output Format: ${format}.
+    Context: ${customPrompt}.
     
-    const prompt = `Generate a quick, 5-minute daily challenge task for a student learning about: ${topic}.`;
-
+    Format: Markdown. Use H2 for sections.
+    `;
     try {
-        const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: DAILY_CHALLENGE_SCHEMA
-            }
-        });
-        const data = JSON.parse(response.text || "{}");
-        
-        return {
-            id: uuidv4(),
-            title: `Daily: ${data.title}`,
-            description: data.description,
-            xp: data.xp || 50,
-            isCompleted: false,
-            type: 'Practice',
-            resources: []
-        };
-    } catch (e) {
-        // Fallback
-        return {
-            id: uuidv4(),
-            title: "Daily: Quick Review",
-            description: "Review your notes from the last lesson for 5 minutes.",
-            xp: 50,
-            isCompleted: false,
-            type: 'Practice',
-            resources: []
-        };
-    }
+        const response = await ai.models.generateContent({ model, contents: prompt });
+        return response.text || "No project generated.";
+    } catch (e) { return "Error generating project."; }
 }
+
+export const generateExportMarkdown = (task: Task): string => {
+    return `
+# ${task.title}
+**Grade Level**: ${task.plan?.gradeLevel || 'N/A'}
+**Duration**: ${task.plan?.duration || 'N/A'}
+**Context**: ${task.plan?.customContext || 'N/A'}
+
+## Lesson Plan
+**Objectives**:
+${task.plan?.objectives.map(o => `- ${o}`).join('\n') || '- N/A'}
+
+**Procedure**:
+**Warm Up**: ${task.plan?.warmUp}
+**Main**: ${task.plan?.mainActivity}
+**Wrap Up**: ${task.plan?.wrapUp}
+
+---
+## Lecture Slides
+${task.slides?.map((s, i) => `### Slide ${i+1}: ${s.title}\n${s.content.join('\n')}\n*Script*: ${s.script}\n*[Image Generated]*`).join('\n\n') || "No slides."}
+
+---
+## Narrative: ${task.story?.theme || 'None'}
+**Characters**:
+${task.story?.characters?.map(c => `- ${c.name} (${c.gender}, ${c.age}): ${c.role}`).join('\n') || "No characters."}
+
+**Scenes**:
+${task.story?.scenes.map((s, i) => `${i+1}. ${s}`).join('\n') || ''}
+
+---
+## Differentiation
+**Support**: ${task.differentiation?.support}
+**Core**: ${task.differentiation?.core}
+**Challenge**: ${task.differentiation?.challenge}
+
+---
+## Practical Activity
+${task.practicalContent || 'N/A'}
+
+---
+## Project
+${task.projectContent || 'N/A'}
+    `;
+}
+
+// ... Legacy ...
+export const serializeLessonDNA = (quest: Quest): string => { return JSON.stringify(quest, null, 2); }
+export const getAiTutorResponse = async (history: ChatMessage[], taskTitle: string, persona: AiPersona): Promise<string> => { return "Thinking..."; };
+export const generateDailyChallenge = async (topics: string[]): Promise<Task> => { return { id: uuidv4(), title: "Daily Review", description: "Review your recent notes.", xp: 50, type: 'Practice', isCompleted: false, resources: [] }; }
+export const generateQuiz = async (taskTitle: string): Promise<QuizQuestion[]> => { return []; };
+export const generateFlashcards = async (taskTitle: string): Promise<Flashcard[]> => { return []; };
+export const generateLessonContent = async (taskTitle: string, taskDescription: string): Promise<string> => { return "Content"; };

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import * as Icons from 'lucide-react';
 import { ViewType } from '../types';
@@ -14,6 +15,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onChangeView, role
   const navItems: { id: ViewType; label: string; icon: any }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Icons.LayoutDashboard },
     { id: 'explore', label: 'Explore', icon: Icons.Compass },
+    { id: 'vault', label: 'Vault', icon: Icons.Archive }, // Added Vault
     { id: 'settings', label: 'Settings', icon: Icons.Settings },
   ];
 
