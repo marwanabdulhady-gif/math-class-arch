@@ -266,19 +266,23 @@ export const generateCharacters = async (
 
 // --- REAL IMAGE GENERATION ---
 export const generateSceneImage = async (sceneDescription: string, artDirection: string, aspectRatio: string = "1:1", context: string = ""): Promise<string | null> => {
-    const model = "gemini-2.5-flash-image"; 
+    const model = "gemini-3-pro-image-preview"; // Upgraded from 2.5
     
-    // Strict prompt engineering for consistency
+    // Strict prompt engineering for consistency and quality
     const prompt = `
-    STRICT VISUAL DIRECTION: ${artDirection}
+    Generate a high-fidelity, cinematic masterpiece image.
+    
+    ART DIRECTION: ${artDirection}
     
     SCENE CONTENT: ${sceneDescription}
     ${context ? `CONTEXT: ${context}` : ''}
     
     INSTRUCTIONS:
-    - Adhere 100% to the STRICT VISUAL DIRECTION for style, lighting, and color palette.
+    - Adhere 100% to the ART DIRECTION for style, lighting, and color palette.
     - Ensure character consistency based on CONTEXT if provided.
-    - Do not add text to the image.
+    - Render in 4K resolution detail.
+    - Perfect lighting, composition, and photorealism (unless style dictates otherwise).
+    - NO text, labels, watermarks, or artifacts.
     `;
     
     try {
@@ -287,7 +291,8 @@ export const generateSceneImage = async (sceneDescription: string, artDirection:
             contents: prompt,
             config: {
                 imageConfig: {
-                    aspectRatio: aspectRatio as any
+                    aspectRatio: aspectRatio as any,
+                    imageSize: '2K' // Explicitly request higher resolution
                 }
             }
         });
@@ -307,8 +312,20 @@ export const generateSceneImage = async (sceneDescription: string, artDirection:
 }
 
 export const generateInfographic = async (contentSummary: string, style: string): Promise<string | null> => {
-    const model = "gemini-2.5-flash-image";
-    const prompt = `Create a visually rich Educational Infographic. Style: ${style}. Topic Summary: ${contentSummary}. Ensure it looks professional, clean, and informative.`;
+    const model = "gemini-3-pro-image-preview"; // Upgraded
+    const prompt = `
+    Create a visually rich, high-resolution Educational Infographic.
+    
+    STYLE: ${style}
+    TOPIC SUMMARY: ${contentSummary}
+    
+    REQUIREMENTS:
+    - Professional graphic design quality.
+    - Clear visual hierarchy.
+    - Use icons, charts, and diagrams to explain the concept.
+    - High contrast, vector-like quality.
+    - No garbled text.
+    `;
     
     try {
         const response = await ai.models.generateContent({
@@ -316,7 +333,8 @@ export const generateInfographic = async (contentSummary: string, style: string)
             contents: prompt,
             config: {
                 imageConfig: {
-                    aspectRatio: '3:4' // Portrait for infographics
+                    aspectRatio: '3:4', // Portrait for infographics
+                    imageSize: '2K' // Higher res
                 }
             }
         });
